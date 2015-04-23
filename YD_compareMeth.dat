@@ -1,0 +1,129 @@
+# Designed by Yannick Dandois
+# UGent
+# Template for method comparison
+
+
+
+#presetting values - DO NOT EDIT, only edit CHANGING VALUES
+from numpy import arange
+import datetime
+import matplotlib.pyplot as plt
+
+R = 1
+list_E1 = []
+list_E2 = []
+list_E3 = []
+R=1
+prog = 0.1
+progbar = '..........'
+
+
+#--------------------------------------------CHANGING VALUES----------------------------------#
+memory 12 gb			#some pc's must be set to much less.
+#define energies to be calculated (only supports 3 atm)
+set basis cc-pVDZ		#STO-3G or cc-pVDZ - ask Mario for diff.
+cE1 = 'HF TOTAL ENERGY'		#Red
+ccE1 = 'scf'
+cE2 = 'MP2 TOTAL ENERGY'	#Blue
+ccE2 = 'mp2'
+cE3 = 'DFT TOTAL ENERGY'	#Green
+ccE3 = 'b3lyp'
+
+#Distance limits
+minD = 0.2
+maxD = 3
+intD = 0.1
+
+
+#defining molecules - last defined molecule will be used
+molecule Be2O {
+  	H	-R	0.	0.
+  	Be	0.	0.	0.
+  	H	R	0.	0.
+}
+
+
+Rvals = []		#used if you want to use a predefine list - otherwise leave empty list
+#--------------------------------------------CHANGING VALUES----------------------------------#
+
+
+#--------------------------------------------NO EDITING BEYOND--------------------------------#
+print (' ')
+if (str(Rvals) == '[]'):
+	Rvals = arange(minD,maxD,intD).tolist()
+	print ('Using predifined D limits')
+	print (' ')
+	
+
+#YD_debug - temp
+print ('Doing some math')
+print (' ')
+print ('[%s]' %progbar)
+t1 = datetime.datetime.now()
+
+for R in Rvals:
+	progperc = (float(Rvals.index(R))/float(len(Rvals)))
+	if (progperc > prog):
+		prog +=0.1
+		progbar = '|' + progbar
+		print ('[%s] %s' %(progbar[:10], (str(progperc*100)[:2] + '%')))
+	Be2O.R = R
+	energy(ccE1)
+	E1 = get_variable(cE1)
+	energy(ccE2)
+	E2 = get_variable(cE2)
+	energy (ccE3)
+	E3 = get_variable(cE3)
+	list_E1 += [E1]
+	list_E2 += [E2]
+	list_E3 += [E3]	
+total = list_E1 + list_E2 + list_E3
+
+t2 = datetime.datetime.now()
+deltaT = t2-t1
+print ('[||||||||||] 100%')
+print (' ')
+print ('Did some math')
+print ('which took %s seconds' %(deltaT.total_seconds()))
+print (' ')
+
+
+#Creating the graph 
+plt.title('Energy vs. Distance')
+plt.xlabel('Distance')
+plt.ylabel('Energy')
+plt.axis([0,(max(Rvals)+1),(min(total)-1),(max(total)+1)])
+plt.plot(Rvals, list_E1, 'ro', Rvals, list_E2, 'bs', Rvals, list_E3, 'g^')
+plt.savefig('PLOT')
+
+#YD_debug - just temp, graph with only E1
+#plt.plot(Rvals, list_E1, 'ro')
+#plt.axis([0,(max(Rvals)+1),(min(list_E1)-1),(max(list_E1)+1)])
+#plt.savefig('PLOT')
+#only show graph after calc has finished or script wil stop
+
+
+#Calculating minimum energy and optimal distance - must be changed to a plotted version!!!
+print ('Calculating minE and optD')
+minE1 = min(list_E1)
+print ('Minimum %s is %sH' %(cE1, minE1))
+optD1 = Rvals[list_E1.index(minE1)]
+print('Optimal distance is '+str(optD1))
+print (' ')
+    
+minE2 = min(list_E2)
+print ('Minimum %s is %sH' %(cE2, minE2))
+optD2 = Rvals[list_E2.index(minE2)]
+print('Optimal distance is '+str(optD2))
+print (' ')
+
+minE3 = min(list_E3)
+print ('Minimum %s is %sH' %(cE3, minE3))
+optD3 = Rvals[list_E3.index(minE3)]
+print('Optimal distance is '+str(optD3))
+print (' ')
+
+
+
+#show graph on end
+plt.show()
