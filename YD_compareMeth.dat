@@ -3,39 +3,56 @@
 # Template for method comparison
 
 
-
-#presetting values - DO NOT EDIT, only edit CHANGING VALUES
-from numpy import arange
+import numpy as np
 import datetime
 import matplotlib.pyplot as plt
+#from numba import autojit
 
-R = 1
-list_E1 = []
-list_E2 = []
-list_E3 = []
-R=1
-prog = 0.1
-progbar = '..........'
-
+#presetting values for method amount check - change into if None
+for x in xrange(10):
+	y = x + 1
+	exec "cE%s = ''" %(y)
 
 #--------------------------------------------CHANGING VALUES----------------------------------#
-memory 12 gb			#some pc's must be set to much less.
-#define energies to be calculated (only supports 3 atm)
-set basis cc-pVDZ		#STO-3G or cc-pVDZ - ask Mario for diff.
-cE1 = 'HF TOTAL ENERGY'		#Red
+memory 12 gb				#some pc's must be set to much less.
+#define energies to be calculated 	(only supports 3 atm going for 10 max)
+set basis cc-pVDZ			#STO-3G or cc-pVDZ
+cE1 = 'HF TOTAL ENERGY'
 ccE1 = 'scf'
-cE2 = 'MP2 TOTAL ENERGY'	#Blue
-ccE2 = 'mp2'
-cE3 = 'DFT TOTAL ENERGY'	#Green
-ccE3 = 'b3lyp'
+cE2 = 'CISD TOTAL ENERGY'
+ccE2 = 'cisd'
+cE3 = 'CCSD(T) TOTAL ENERGY'
+ccE3 = 'ccsd(t)'
+cE4 = 'FCI TOTAL ENERGY'
+ccE4 = 'fci'
+"""
+#temp override
+cE4 = 'HF TOTAL ENERGY'
+ccE4 = 'scf'
+"""
+
 
 #Distance limits
-minD = 0.2
-maxD = 3
+minD = 0.3
+maxD = 2.5			#1.8 for Be2O - 2.5 for Be2O
 intD = 0.1
+D2 = 0.1			#D2 cannot be higher then intD
+intD2 = 0.015
+Rvals = []			#used if you want to use a predefine list instead of limits
 
+
+#Minimum presicion for E using iterations:
+Eprec = 1.0/1000000		#set Eprec to 1.0 if you want to use # of iterations
+iterations = 25		#otherwise set iterations to 10000
 
 #defining molecules - last defined molecule will be used
+
+molecule H2O {
+  	O
+  	H	1	R	
+  	H	1	R	2	104.479848
+}
+
 molecule Be2O {
   	H	-R	0.	0.
   	Be	0.	0.	0.
@@ -43,87 +60,155 @@ molecule Be2O {
 }
 
 
-Rvals = []		#used if you want to use a predefine list - otherwise leave empty list
+
 #--------------------------------------------CHANGING VALUES----------------------------------#
+#-------------------------------------------NO EDITING BEYOND---------------------------------#
 
 
-#--------------------------------------------NO EDITING BEYOND--------------------------------#
-print (' ')
-if (str(Rvals) == '[]'):
-	Rvals = arange(minD,maxD,intD).tolist()
-	print ('Using predifined D limits')
-	print (' ')
+#-------------------------------------Defining extra functions--------------------------------#
+
+#YD_calcE
+#[Rvals,[cE1,ccE1]]
+#@autojit
+def YD_calcE(_Rvals, tE):
+	#load calc variables
+	_cE = tE[0]
+	_ccE = tE[1]
+	_list_E = []
+	#make the calc
+	for R in _Rvals:
+		Be2O.R = R
+		energy(_ccE)
+		_E = get_variable(_cE)
+		_list_E += [_E]	
+	#return needed var
+	return _list_E
+	
+#YD_calcM - used to find a min in a curve
+#[_Rvals, [cE, ccE, list_E]]
+#@autojit
+def YD_calcM(_Rvals, _tE):
+	_cE = _tE[0]
+	_ccE = _tE[1]
+	_list_E = _tE[2]
+	_minE1 = min(_list_E)
+	q= _list_E[:]					#cannot remove items from original list
+	q.remove(_minE1)
+	_minE2 = min(q)
+	_optD1 = _Rvals[_list_E.index(_minE1)] - intD
+	_optD2 = _Rvals[_list_E.index(_minE2)] + intD
+	Be2O.R = _optD1
+	energy(_ccE)
+	_minE1 = get_variable(_cE)
+	Be2O.R = _optD2
+	energy(_ccE)
+	_minE2 = get_variable(_cE)
+	x = 0
+	while (x < iterations):
+		x +=1
+		_optDL = (2*_optD1+_optD2)/3
+		_optDR = (_optD1+2*_optD2)/3
+		Be2O.R = _optDL
+		energy(_ccE)
+		_minEnL = get_variable(_cE)
+		Be2O.R = _optDR
+		energy(_ccE)
+		_minEnR = get_variable(_cE)
+		if (_minEnL < _minEnR):
+			_optD2 = _optDR
+			_minE2 = _minEnR
+		elif (_minEnL > _minEnR):
+			_optD1 = _optDR
+			_minE1 = _minEnL
+		else:
+			x = 10001
+		cEprec = abs(_minE2-_minE1)
+		if ((Eprec > cEprec) and (Eprec != 1)):
+			x = 10001
+		
+	return [(_minE1 + _minE2)/2, (_optD1 + _optD2)/2, cEprec]
+
+#YD_limit()
+def YD_limit(_iterations):
+	if (_iterations < 1000):
+		print ('\nRunning %s iterations.\n\n[..........]' %(_iterations,))
+	else:
+		print ('\nAchieving a minimum precision of %s H\n\n[..........]' %Eprec)
+		if (_iterations > 200):
+			_iterations = 200
+	return _iterations
+
+#YD_graph()
+def YD_graph():
+	plt.title('Energy vs. Distance')
+	plt.xlabel('Distance')
+	plt.ylabel('Energy')
+	plt.axis([0,(max(Rvals)+1),(min(total)-1),(max(total)+1)])
+	for x in xrange(Nmethods):
+		y = x+1
+		exec "plt.plot(Rvals, list_E%s, %s, label=cE%s)" %(y, ["'ro'", "'bs'","'g^'","'y^'","'rs'", "'b^'","'go'","'r^'", "'bo'","'gs'"][x], y)	
+	plt.legend(loc='best')
+	plt.savefig('PLOT')
+	plt.show()
 	
 
-#YD_debug - temp
-print ('Doing some math')
-print (' ')
-print ('[%s]' %progbar)
-t1 = datetime.datetime.now()
+#------------------------------------Done defining extra functions----------------------------#
+#----------------------------------------Starting actual script-------------------------------#
+#done as code, not func for now
+#def YD_createVar():
+Rvals, Rvals2, methods, total = [], [], [], []
+Nmethods = 0						#count the amount of methods and double check them
+for x in xrange(10):
+	y = x + 1
+	exec "if (cE%s != ''): Nmethods += 1" %(y)
 
-for R in Rvals:
-	progperc = (float(Rvals.index(R))/float(len(Rvals)))
-	if (progperc > prog):
-		prog +=0.1
-		progbar = '|' + progbar
-		print ('[%s] %s' %(progbar[:10], (str(progperc*100)[:2] + '%')))
-	Be2O.R = R
-	energy(ccE1)
-	E1 = get_variable(cE1)
-	energy(ccE2)
-	E2 = get_variable(cE2)
-	energy (ccE3)
-	E3 = get_variable(cE3)
-	list_E1 += [E1]
-	list_E2 += [E2]
-	list_E3 += [E3]	
-total = list_E1 + list_E2 + list_E3
+for x in xrange(Nmethods):				#create dynamic var
+	y = x + 1
+	exec "list_E%s, list2_E%s, preE%s = [], [], ''" %(y,y,y)
+	exec "methods += [ cE%s, ccE%s]" %(y, y)
 
-t2 = datetime.datetime.now()
-deltaT = t2-t1
-print ('[||||||||||] 100%')
-print (' ')
-print ('Did some math')
-print ('which took %s seconds' %(deltaT.total_seconds()))
-print (' ')
+	
+#switch to correct Rvals
+if (str(Rvals) == '[]'):
+	Rvals = np.arange(minD,maxD,intD).tolist()
+	print ('\nUsing predifined D limits.\n')
+else:
+	print ('\nUsing custom D limits.\n')
+	
+	
+#execute first time for general
+for x in xrange(Nmethods):
+	y = x + 1
+	_t1 = datetime.datetime.now()
+	prog = float(y)/Nmethods
+	exec "list_E%s = YD_calcE(Rvals,[cE%s,ccE%s])" %(y, y, y)
+	exec "total += list_E%s" %y
+	_deltaT = (datetime.datetime.now() - _t1).total_seconds()
+	progbar = int(prog*10)*'|' + '............'
+	exec "a = cE%s" %y
+	print ('[%s] %s' %(progbar[:10], (str(int(prog*100)) + ('%' + (' - %s sec for %s' %(int(_deltaT), a))))))
 
-
-#Creating the graph 
-plt.title('Energy vs. Distance')
-plt.xlabel('Distance')
-plt.ylabel('Energy')
-plt.axis([0,(max(Rvals)+1),(min(total)-1),(max(total)+1)])
-plt.plot(Rvals, list_E1, 'ro', Rvals, list_E2, 'bs', Rvals, list_E3, 'g^')
-plt.savefig('PLOT')
-
-#YD_debug - just temp, graph with only E1
-#plt.plot(Rvals, list_E1, 'ro')
-#plt.axis([0,(max(Rvals)+1),(min(list_E1)-1),(max(list_E1)+1)])
-#plt.savefig('PLOT')
-#only show graph after calc has finished or script wil stop
+iterations = YD_limit(iterations)
 
 
-#Calculating minimum energy and optimal distance - must be changed to a plotted version!!!
-print ('Calculating minE and optD')
-minE1 = min(list_E1)
-print ('Minimum %s is %sH' %(cE1, minE1))
-optD1 = Rvals[list_E1.index(minE1)]
-print('Optimal distance is '+str(optD1))
-print (' ')
-    
-minE2 = min(list_E2)
-print ('Minimum %s is %sH' %(cE2, minE2))
-optD2 = Rvals[list_E2.index(minE2)]
-print('Optimal distance is '+str(optD2))
-print (' ')
-
-minE3 = min(list_E3)
-print ('Minimum %s is %sH' %(cE3, minE3))
-optD3 = Rvals[list_E3.index(minE3)]
-print('Optimal distance is '+str(optD3))
-print (' ')
+#execute second for exact calculations
+for x in xrange(Nmethods):
+	y = x+1
+	_t1 = datetime.datetime.now()
+	prog = float(y)/Nmethods
+	exec "[minE%s, optD%s, tpreE%s] = YD_calcM(Rvals, [cE%s, ccE%s, list_E%s])" %(y, y, y, y, y, y)
+	_deltaT = (datetime.datetime.now() - _t1).total_seconds()
+	progbar = int(prog*10)*'|' + '............'
+	exec "a = cE%s" %y
+	print ('[%s] %s' %(progbar[:10], (str(int(prog*100)) + ('%' + (' - %s sec for %s' %(int(_deltaT), a))))))
 
 
+#print results
 
-#show graph on end
-plt.show()
+for x in xrange(Nmethods):
+	y = x+1
+	exec "a, b = cE%s, minE%s" %(y, y)
+	print ('\nMinimum %s is %s H\nOptimal distance is %s\n' %(a, b, optD1))
+
+#Creating the graph
+YD_graph()
