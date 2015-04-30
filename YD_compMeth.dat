@@ -2,21 +2,22 @@
 # UGent
 # Template for method comparison
 
+#import multiprocessing as mp
+import time
+import sys
 
 import numpy as np
 import datetime
 import matplotlib.pyplot as plt
-#from numba import autojit
 
 #presetting values for method amount check - change into if None
-for x in xrange(10):
-	y = x + 1
+for y in xrange(1,11):
 	exec "cE%s = ''" %(y)
 
 #--------------------------------------------CHANGING VALUES----------------------------------#
 memory 12 gb				#some pc's must be set to much less.
 #define energies to be calculated 	(only supports 10 - 4 is optimum)
-set basis cc-pVDZ			#STO-3G or cc-pVDZ
+set basis STO-3G			#STO-3G or cc-pVDZ
 cE1 = 'HF TOTAL ENERGY'
 ccE1 = 'scf'
 cE2 = 'CISD TOTAL ENERGY'
@@ -25,190 +26,212 @@ cE3 = 'CCSD(T) TOTAL ENERGY'
 ccE3 = 'ccsd(t)'
 cE4 = 'FCI TOTAL ENERGY'
 ccE4 = 'fci'
-"""
-#temp override
-cE4 = 'HF TOTAL ENERGY'
-ccE4 = 'scf'
-"""
 
 
-#Distance limits
-minD = 0.3
-maxD = 2.5			#1.8 for Be2O - 2.5 for Be2O
-intD = 0.1
-D2 = 0.1			#D2 cannot be higher then intD
-intD2 = 0.015
+#Distance limits for bonds - will only be used for single molecules
+minD = 0.7			#0 till 0.7
+maxD = 1.8			#1.8 for Be2O - 2.5 for Be2O
+intD = 0.1			#0.1 for bond
 Rvals = []			#used if you want to use a predefine list instead of limits
 
 
 #Minimum presicion for E using iterations:
-Eprec = 1.0/1000000		#set Eprec to 1.0 if you want to use # of iterations
-iterations = 25		#otherwise set iterations to 10000
+Dprec = 1.0/1000000		#set Dprec to 1.0 if you want to use # of iterations
+iterations = 100			#otherwise set iterations to 10000 for a limit
 
-#defining molecules - last defined molecule will be used
+#defining molecules - H2O and Be2H is allready defined below, variable R is used for distance
 
-molecule H2O {
+
+molec = raw_input("What molecule should be calculated?").lower()
+#if userdef: molecule molec {}
+
+
+
+#--------------------------------------------CHANGING VALUES----------------------------------#
+#-------------------------------------------NO EDITING BEYOND---------------------------------#
+#predifined molecules
+molLib = ["h2o", "beh2", "mh2o", "mbeh2"]
+mmolLib = ["mh2o", "mbeh2"]
+#for all mmolLib a library must exist with S values or it will be calculated
+#calc not implemented yet!!!
+if (molec in molLib):
+	print ('\nCalculating for %s' %molec)
+else:
+	print "Molecule not defined...\n Please use one from list.\n%s" %molLib
+	sys.exit()
+	#print ('\nChecking library...')
+	#exec "molecule %s {\n	pubchem:%s\n}" %(molec, molec)
+
+molecule h2o {
   	O
   	H	1	R	
   	H	1	R	2	104.479848
 }
 
-molecule Be2O {
+
+molecule mh2o {
+  	O1
+  	H1	O1	S	
+  	H2	O1	S	H1	104.479848
+  	O2	O1	R	H1	0.0	
+  	H3	O2	S	O1	0.0
+  	H4	O2	S	H3	104.479848
+}
+dict_mh2o = {'scf': 0.986979650753, 'cisd': 1.02157800071, 'ccsd(t)': 1.02350308079, 'fci': 1.02364398801}
+dictE_mh2o = {'scf': -74.9655155303, 'cisd': -75.0197643847, 'ccsd(t)': -75.0207630111, 'fci': -75.0208370363}
+
+
+molecule beh2 {
   	H	-R	0.	0.
   	Be	0.	0.	0.
   	H	R	0.	0.
 }
 
 
-
-#--------------------------------------------CHANGING VALUES----------------------------------#
-#-------------------------------------------NO EDITING BEYOND---------------------------------#
+molecule mbeh2 {
+  	H	-S	0.	0.
+  	Be	0.	0.	0.
+  	H	S	0.	0.
+  	H	-S	R	0.
+  	Be	0.	R	0.
+  	H	S	R	0.
+}
+dict_mbeh2 = {'scf': 1.29060530702, 'cisd': 1.31520181125, 'ccsd(t)': 1.31621429141, 'fci': 1.31647993543}
+dictE_mbeh2 = {'scf': -15.5614255307, 'cisd': -15.5945133778, 'ccsd(t)': -15.5950668674, 'fci': -15.5952467509}
 
 
 #-------------------------------------Defining extra functions--------------------------------#
 
+exec "activate(%s)" %molec
+#YD_energy
+def YD_energy(_cE, _ccE, _D):
+	if (molec in mmolLib): exec "%s.S = dict_%s['%s']" %(molec, molec, _ccE)
+	exec "%s.R = _D" %molec
+	energy(_ccE)
+	return (get_variable(_cE))
+
 #YD_calcE
 #[Rvals,[cE1,ccE1]]
-#@autojit
-def YD_calcE(_Rvals, tE):
-	#load calc variables
-	_cE = tE[0]
-	_ccE = tE[1]
+def YD_calcE(_Rvals, (_cE, _ccE)):
 	_list_E = []
-	#make the calc
 	for R in _Rvals:
-		Be2O.R = R
-		energy(_ccE)
-		_E = get_variable(_cE)
+		_E = YD_energy(_cE, _ccE, R)
 		_list_E += [_E]	
-	#return needed var
 	return _list_E
 	
-#YD_calcM - used to find a min in a curve
+#YD_calcM - used to find a min in a curve - golden section search
 #[_Rvals, [cE, ccE, list_E]]
-#@autojit
-def YD_calcM(_Rvals, _tE):
-	_cE = _tE[0]
-	_ccE = _tE[1]
-	_list_E = _tE[2]
-	_minE1 = min(_list_E)
-	q= _list_E[:]					#cannot remove items from original list
-	q.remove(_minE1)
-	_minE2 = min(q)
-	_optD1 = _Rvals[_list_E.index(_minE1)] - intD
-	_optD2 = _Rvals[_list_E.index(_minE2)] + intD
-	Be2O.R = _optD1
-	energy(_ccE)
-	_minE1 = get_variable(_cE)
-	Be2O.R = _optD2
-	energy(_ccE)
-	_minE2 = get_variable(_cE)
-	x = 0
-	while (x < iterations):
-		x +=1
-		_optDL = (2*_optD1+_optD2)/3
-		_optDR = (_optD1+2*_optD2)/3
-		Be2O.R = _optDL
-		energy(_ccE)
-		_minEnL = get_variable(_cE)
-		Be2O.R = _optDR
-		energy(_ccE)
-		_minEnR = get_variable(_cE)
-		if (_minEnL < _minEnR):
-			_optD2 = _optDR
-			_minE2 = _minEnR
-		elif (_minEnL > _minEnR):
-			_optD1 = _optDR
-			_minE1 = _minEnL
+def YD_calcM(_Rvals, (_cE, _ccE, _list_E)):
+	#take interval around min
+	a, b = (_Rvals[_list_E.index(min(_list_E))] - 2*intD), (_Rvals[_list_E.index(min(_list_E))] + 2*intD)
+	cDprec, gr = abs(b-a), 0.618
+	x = b - gr*cDprec
+	y = a + gr*cDprec
+	_iter = 0
+	global fx
+	global fy
+	while ((abs(x-y)>Dprec) and (_iter < iterations)):
+		_iter += 1
+		fx = YD_energy(_cE, _ccE, x)
+		fy = YD_energy(_cE, _ccE, y)
+		if (fx < fy):
+			b=y
+			y=x
+			x=b-gr*(b-a)
 		else:
-			x = 10001
-		cEprec = abs(_minE2-_minE1)
-		if ((Eprec > cEprec) and (Eprec != 1)):
-			x = 10001
-		
-	return [(_minE1 + _minE2)/2, (_optD1 + _optD2)/2, cEprec]
+			a=x
+			x=y
+			y=a+gr*(b-a)
+	return [(fx + fy)/2, (x + y)/2, abs(x-y), _iter]
 
-#YD_limit()
-def YD_limit(_iterations):
-	if (_iterations < 1000):
-		print ('\nRunning %s iterations.\n\n[..........]' %(_iterations,))
-	else:
-		print ('\nAchieving a minimum precision of %s H\n\n[..........]' %Eprec)
-		if (_iterations > 200):
-			_iterations = 200
-	return _iterations
+#YD_printBar()
+def YD_printBar(_t1, _prog):
+	_deltaT = (datetime.datetime.now() - _t1).total_seconds()
+	progbar = int(prog*10)*'|' + '............'
+	exec "a = cE%s" %y
+	print ('[%s] %s' %(progbar[:10], (str(int(prog*100)) + ('%' + (' - %s sec for %s' %(int(_deltaT), a))))))
+
+#YD_print()
+def YD_print():
+	for y in xrange(1,Nmethods+1):
+		exec "a, b, c, d, e = cE%s, minE%s, tpreE%s, optD%s, iter%s" %(y, y, y, y, y)
+		print ('\nMinimum %s is %s H (prec: %s)\nOptimal distance is %s Å\n(iter: %s)\n' %(a, b, c, d, e))
+
+#YD_print2()
+def YD_print2():
+	for y in xrange(1,Nmethods+1):
+		exec "_ccE = ccE%s" %y
+		exec "a, b, c = cE%s, minE%s, (100*(minE%s/dictE_%s['%s'])-200)" %(y, y, y,molec,_ccE)
+		print ('\nMinimum %s is %s H\nwith a deviation of %s' %(a, b,c)) + ' %'
+
 
 #YD_graph()
 def YD_graph():
 	plt.title('Energy vs. Distance')
 	plt.xlabel('Distance')
 	plt.ylabel('Energy')
-	plt.axis([0,(max(Rvals)+1),(min(total)-1),(max(total)+1)])
-	for x in xrange(Nmethods):
-		y = x+1
-		exec "plt.plot(Rvals, list_E%s, %s, label=cE%s)" %(y, ["'ro'", "'bs'","'g^'","'y^'","'rs'", "'b^'","'go'","'r^'", "'bo'","'gs'"][x], y)	
-	plt.legend(loc='best')
-	plt.savefig('PLOT')
+	#plt.axis([(min(Rvals)-0.5),(max(Rvals)+0.5),(min(total)-1),(max(total)+1)])
+	for y in xrange(1,Nmethods+1):
+		exec "plt.plot(Rvals, list_E%s, %s, label=cE%s)" %(y, ["'rs'","'ro'", "'bs'","'g^'","'y^'","'rs'", "'b^'","'go'","'r^'", "'bo'","'gs'"][y], y)	
+	plt.legend(loc="best")
+	plt.savefig('PLOT_%s' %molec)
 	plt.show()
 	
 
 #------------------------------------Done defining extra functions----------------------------#
-#----------------------------------------Starting actual script-------------------------------#
 #done as code, not func for now
 #def YD_createVar():
 Rvals, Rvals2, methods, total = [], [], [], []
-Nmethods = 0						#count the amount of methods and double check them
-for x in xrange(10):
-	y = x + 1
+
+#switch to correct Rvals
+Rvals = np.arange(minD,maxD,intD).tolist()
+
+#count the amount of methods and double check them
+Nmethods = 0
+for y in xrange(1,11):
 	exec "if (cE%s != ''): Nmethods += 1" %(y)
 
-for x in xrange(Nmethods):				#create dynamic var
-	y = x + 1
+for y in xrange(1,Nmethods+1):
 	exec "list_E%s, list2_E%s, preE%s = [], [], ''" %(y,y,y)
 	exec "methods += [ cE%s, ccE%s]" %(y, y)
 
+#temp fix
+fx = 0
+fy = 0
+
 	
-#switch to correct Rvals
-if (str(Rvals) == '[]'):
-	Rvals = np.arange(minD,maxD,intD).tolist()
-	print ('\nUsing predifined D limits.\n')
+#----------------------------------------Starting actual script-------------------------------#
+
+if ((molec in molLib) and (molec not in mmolLib)):	
+	#execute first time for general
+	print "\n[..........]"
+	for y in xrange(1,Nmethods+1):
+		t1 = datetime.datetime.now()
+		prog = float(y)/Nmethods
+		exec "list_E%s = YD_calcE(Rvals,[cE%s,ccE%s])" %(y, y, y)
+		exec "total += list_E%s" %y
+		YD_printBar(t1, prog)
+
+	#execute to determin min
+	print "\n[..........]"
+	if (molec in mmolLib): exec "%s.S = 1000" %(molec)
+	for y in xrange(1,Nmethods+1):
+		t1 = datetime.datetime.now()
+		prog = float(y)/Nmethods
+		exec "[minE%s, optD%s, tpreE%s, iter%s] = YD_calcM(Rvals, [cE%s, ccE%s, list_E%s])" %(y, y, y, y, y, y, y)
+		YD_printBar(t1, prog)
+
+	#Creating the output
+	YD_print()
+	YD_graph()
 else:
-	print ('\nUsing custom D limits.\n')
+	print "\n[..........]"
+	for y in xrange(1,Nmethods+1):
+		t1 = datetime.datetime.now()
+		prog = float(y)/Nmethods
+		exec "minE%s = YD_energy(cE%s,ccE%s,500)" %(y, y, y)
+		YD_printBar(t1, prog)
 	
-	
-#execute first time for general
-for x in xrange(Nmethods):
-	y = x + 1
-	_t1 = datetime.datetime.now()
-	prog = float(y)/Nmethods
-	exec "list_E%s = YD_calcE(Rvals,[cE%s,ccE%s])" %(y, y, y)
-	exec "total += list_E%s" %y
-	_deltaT = (datetime.datetime.now() - _t1).total_seconds()
-	progbar = int(prog*10)*'|' + '............'
-	exec "a = cE%s" %y
-	print ('[%s] %s' %(progbar[:10], (str(int(prog*100)) + ('%' + (' - %s sec for %s' %(int(_deltaT), a))))))
+	#Creating the output
+	YD_print2()
 
-iterations = YD_limit(iterations)
-
-
-#execute second for exact calculations
-for x in xrange(Nmethods):
-	y = x+1
-	_t1 = datetime.datetime.now()
-	prog = float(y)/Nmethods
-	exec "[minE%s, optD%s, tpreE%s] = YD_calcM(Rvals, [cE%s, ccE%s, list_E%s])" %(y, y, y, y, y, y)
-	_deltaT = (datetime.datetime.now() - _t1).total_seconds()
-	progbar = int(prog*10)*'|' + '............'
-	exec "a = cE%s" %y
-	print ('[%s] %s' %(progbar[:10], (str(int(prog*100)) + ('%' + (' - %s sec for %s' %(int(_deltaT), a))))))
-
-
-#print results
-
-for x in xrange(Nmethods):
-	y = x+1
-	exec "a, b = cE%s, minE%s" %(y, y)
-	print ('\nMinimum %s is %s H\nOptimal distance is %s\n' %(a, b, optD1))
-
-#Creating the graph
-YD_graph()
